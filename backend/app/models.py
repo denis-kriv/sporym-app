@@ -1,113 +1,159 @@
 import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
 
-from pydantic import EmailStr
-from sqlmodel import Field, Relationship, SQLModel
+from sqlalchemy import BigInteger, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlmodel import Column, Field, SQLModel
 
-
-# Shared properties
-class UserBase(SQLModel):
-    email: EmailStr = Field(unique=True, index=True, max_length=255)
-    is_active: bool = True
-    is_superuser: bool = False
-    full_name: str | None = Field(default=None, max_length=255)
-
-
-# Properties to receive via API on creation
-class UserCreate(UserBase):
-    password: str = Field(min_length=8, max_length=128)
-
-
-class UserRegister(SQLModel):
-    email: EmailStr = Field(max_length=255)
-    password: str = Field(min_length=8, max_length=128)
-    full_name: str | None = Field(default=None, max_length=255)
+from app.enums import (
+    ChallengeStatus,
+    ChallengeType,
+    EventStatus,
+    MarketStatus,
+    MarketType,
+    OutcomeCode,
+    ParticipationStatus,
+    PayoutRule,
+    SportType,
+    TransactionType,
+)
 
 
-# Properties to receive via API on update, all are optional
-class UserUpdate(UserBase):
-    email: EmailStr | None = Field(default=None, max_length=255)  # type: ignore
-    password: str | None = Field(default=None, min_length=8, max_length=128)
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
-class UserUpdateMe(SQLModel):
-    full_name: str | None = Field(default=None, max_length=255)
-    email: EmailStr | None = Field(default=None, max_length=255)
+# =====================
+# DATABASE MODELS
+# =====================
 
 
-class UpdatePassword(SQLModel):
-    current_password: str = Field(min_length=8, max_length=128)
-    new_password: str = Field(min_length=8, max_length=128)
+class User(SQLModel, table=True):
+    __tablename__ = "users"
 
-
-# Database model, database table inferred from class name
-class User(UserBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    hashed_password: str
-    items: list["Item"] = Relationship(back_populates="owner", cascade_delete=True)
+    telegram_id: int = Field(unique=True, sa_type=BigInteger)
+
+    username: str | None = Field(default=None, max_length=255)
+    first_name: str = Field(max_length=255)
+    last_name: str | None = Field(default=None, max_length=255)
+    photo_url: str | None = Field(default=None, max_length=1024)
+
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
-# Properties to return via API, id is always required
-class UserPublic(UserBase):
-    id: uuid.UUID
+class Event(SQLModel, table=True):
+    __tablename__ = "events"
 
-
-class UsersPublic(SQLModel):
-    data: list[UserPublic]
-    count: int
-
-
-# Shared properties
-class ItemBase(SQLModel):
-    title: str = Field(min_length=1, max_length=255)
-    description: str | None = Field(default=None, max_length=255)
-
-
-# Properties to receive on item creation
-class ItemCreate(ItemBase):
-    pass
-
-
-# Properties to receive on item update
-class ItemUpdate(ItemBase):
-    title: str | None = Field(default=None, min_length=1, max_length=255)  # type: ignore
-
-
-# Database model, database table inferred from class name
-class Item(ItemBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    owner_id: uuid.UUID = Field(
-        foreign_key="user.id", nullable=False, ondelete="CASCADE"
+    sport: SportType = Field(sa_column=Column(Text, nullable=False))
+    name: str = Field(max_length=255)
+    starts_at: datetime
+
+    status: EventStatus = Field(
+        default=EventStatus.SCHEDULED,
+        sa_column=Column(Text, nullable=False, server_default="SCHEDULED"),
     )
-    owner: User | None = Relationship(back_populates="items")
+
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
-# Properties to return via API, id is always required
-class ItemPublic(ItemBase):
-    id: uuid.UUID
-    owner_id: uuid.UUID
+class Market(SQLModel, table=True):
+    __tablename__ = "markets"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    event_id: uuid.UUID
+    type: MarketType = Field(sa_column=Column(Text, nullable=False))
+    params: dict | None = Field(default=None, sa_column=Column(JSONB))
+
+    status: MarketStatus = Field(
+        default=MarketStatus.OPEN,
+        sa_column=Column(Text, nullable=False, server_default="OPEN"),
+    )
+    winning_outcome_id: uuid.UUID | None = Field(default=None)
+
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
-class ItemsPublic(SQLModel):
-    data: list[ItemPublic]
-    count: int
+class Outcome(SQLModel, table=True):
+    __tablename__ = "outcomes"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    market_id: uuid.UUID
+    code: OutcomeCode = Field(sa_column=Column(Text, nullable=False))
+
+    odds: Decimal = Field(max_digits=6, decimal_places=3)
+
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
-# Generic message
+class Challenge(SQLModel, table=True):
+    __tablename__ = "challenges"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    market_id: uuid.UUID
+    type: ChallengeType = Field(sa_column=Column(Text, nullable=False))
+    payout_rule: PayoutRule = Field(sa_column=Column(Text, nullable=False))
+    fee: Decimal = Field(max_digits=6, decimal_places=3)
+    max_participants: int
+    min_bet: int | None = Field(default=None)
+    max_bet: int | None = Field(default=None)
+
+    status: ChallengeStatus = Field(
+        default=ChallengeStatus.OPEN,
+        sa_column=Column(Text, nullable=False, server_default="OPEN"),
+    )
+
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class Participation(SQLModel, table=True):
+    __tablename__ = "participations"
+    __table_args__ = (
+        UniqueConstraint(
+            "challenge_id", "user_id", name="participations_unique_user_per_challenge"
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    challenge_id: uuid.UUID
+    user_id: uuid.UUID
+    outcome_id: uuid.UUID
+    amount: int
+    odds: Decimal = Field(max_digits=6, decimal_places=3)
+    potential_payout: int
+
+    status: ParticipationStatus = Field(
+        default=ParticipationStatus.ACTIVE,
+        sa_column=Column(Text, nullable=False, server_default="ACTIVE"),
+    )
+
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class Transaction(SQLModel, table=True):
+    __tablename__ = "transactions"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID
+    participation_id: uuid.UUID
+    amount: int  # (+): we get money / (-): we give money
+    type: TransactionType = Field(sa_column=Column(Text, nullable=False))
+
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+# =====================
+# PYDANTIC SCHEMAS (for API)
+# =====================
+
+
 class Message(SQLModel):
     message: str
-
-
-# JSON payload containing access token
-class Token(SQLModel):
-    access_token: str
-    token_type: str = "bearer"
-
-
-# Contents of JWT token
-class TokenPayload(SQLModel):
-    sub: str | None = None
-
-
-class NewPassword(SQLModel):
-    token: str
-    new_password: str = Field(min_length=8, max_length=128)
