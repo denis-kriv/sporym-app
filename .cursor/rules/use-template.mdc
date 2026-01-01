@@ -1,0 +1,5 @@
+---
+alwaysApply: true
+---
+
+This repository is created from the template. Template is located in ~/repos/full-stack-fastapi-template. So, If you want to add somthing, like API endpoints, db logic, frontend views, tests -- see the original template. It contains different .md files with instructions and a lot of examples.
