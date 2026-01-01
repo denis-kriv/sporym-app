@@ -33,3 +33,6 @@ jobs:
         run: uv run bash scripts/tests-start.sh "Coverage for ${{ github.sha }}"
         working-directory: backend
       - run: docker compose down -v --remove-orphans
+      - name: Coverage report
+        run: uv run coverage report --fail-under=50
+        working-directory: backend
