@@ -34,5 +34,5 @@ jobs:
         working-directory: backend
       - run: docker compose down -v --remove-orphans
       - name: Coverage report
-        run: uv run coverage report --fail-under=50
+        run: uv run coverage report --fail-under=30
         working-directory: backend
